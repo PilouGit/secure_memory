@@ -1,0 +1,51 @@
+[package]
+name = "secure_memory"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "A secure memory management library"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/username/secure_memory"
+documentation = "https://docs.rs/secure_memory"
+readme = "README.md"
+keywords = ["security", "memory", "crypto"]
+categories = ["cryptography", "memory-management"]
+
+[lib]
+name = "secure_memory"
+path = "src/lib.rs"
+
+[[bin]]
+name = "secure_memory"
+path = "src/main.rs"
+
+[dependencies]
+# Core dependencies
+serde = { version = "1.0", features = ["derive"], optional = true }
+tokio = { version = "1.0", features = ["full"], optional = true }
+tss-esapi = "7.4"
+
+[dev-dependencies]
+criterion = "0.5"
+proptest = "1.0"
+
+[features]
+default = []
+serde = ["dep:serde"]
+async = ["dep:tokio"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = true
+overflow-checks = true
+
+[profile.bench]
+opt-level = 3
+debug = false
+lto = true

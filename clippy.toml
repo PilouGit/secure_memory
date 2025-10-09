@@ -1,0 +1,17 @@
+# Clippy configuration
+avoid-breaking-exported-api = false
+msrv = "1.70.0"
+
+# Allowed lints that would otherwise be denied
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true
+
+# Additional restrictions
+disallowed-methods = [
+    "std::env::set_var",
+    "std::env::remove_var",
+]
+
+# Suppress certain pedantic lints that may be too noisy
+too-many-lines-threshold = 200
+type-complexity-threshold = 250
