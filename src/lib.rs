@@ -31,7 +31,9 @@ pub mod error;
 pub mod utils;
 /// TPM crypto operations
 pub mod tpmcrypto;
-
+/// Secure key operation
+pub mod secure_key;
+pub mod secure_memory;
 pub use buffer::SecureBuffer;
 pub use error::{Error, Result};
 

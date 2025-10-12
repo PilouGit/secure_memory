@@ -24,9 +24,13 @@ path = "src/main.rs"
 serde = { version = "1.0", features = ["derive"], optional = true }
 tokio = { version = "1.0", features = ["full"], optional = true }
 tss-esapi = "7.4"
+rand="0.9.2"
+zeroize="1.8.2"
+aes-gcm = "0.10.3"
+libc=""
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = "0.7.0"
 proptest = "1.0"
 
 [features]
