@@ -33,7 +33,11 @@ pub mod utils;
 pub mod tpmcrypto;
 /// Secure key operation
 pub mod secure_key;
+/// Secure Memory buffer
 pub mod secure_memory;
+/// FFI interface for SecureMemory (C-compatible for JNA/JNI)
+pub mod secure_memory_ffi;
+
 pub use buffer::SecureBuffer;
 pub use error::{Error, Result};
 
