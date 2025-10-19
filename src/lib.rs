@@ -37,7 +37,9 @@ pub mod secure_key;
 pub mod secure_memory;
 /// FFI interface for SecureMemory (C-compatible for JNA/JNI)
 pub mod secure_memory_ffi;
+pub mod tpm_process_auth;
 
+pub mod secure_error;
 pub use buffer::SecureBuffer;
 pub use error::{Error, Result};
 
