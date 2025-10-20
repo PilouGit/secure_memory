@@ -1,13 +1,11 @@
-use secure_memory::tpmcrypto::TpmCrypto;
-use tss_esapi::Result;
+// Temporairement désactivé - nécessite correction du type TctiNameConf
+// use secure_memory::tpmcrypto::TpmCrypto;
+// use tss_esapi::Result;
 
-fn main() -> Result<()> {
-    let mut tpm = TpmCrypto::create("/dev/tpmrm0".to_string())?;
-    
-    let mut buffer = vec![0u8; 32];
-    tpm.random(&mut buffer)?;
-    
-    println!("Random bytes: {:02x?}", buffer);
-    
-    Ok(())
+fn main() {
+    println!("Secure memory library - use `cargo test` to run tests");
+    // let mut tpm = TpmCrypto::create(TctiNameConf::Device(...))?;
+    // let mut buffer = vec![0u8; 32];
+    // tpm.random(&mut buffer)?;
+    // println!("Random bytes: {:02x?}", buffer);
 }

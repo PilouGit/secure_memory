@@ -48,7 +48,9 @@ impl SecureMemory {
         if size == 0 {
             return None;
         }
-         let key = SecureKey::new();
+
+         // ✅ SÉCURITÉ CRITIQUE : Gérer l'échec de génération de clé
+         let key = SecureKey::new()?;
 
          unsafe {
             let cipher_key = Key::<Aes256Gcm>::from_slice(key.as_slice());
@@ -156,7 +158,8 @@ impl SecureMemory {
          let result = match cipher.encrypt(nonce, Payload { msg: buffer, aad: &aad }) {
              Ok(res) => res,
              Err(err) => {
-                 println!("Error during encryption: {}", err);
+                 // ✅ SÉCURITÉ : Pas de fuite d'information détaillée
+                 eprintln!("Cryptographic operation failed");
                  return Err(err);
              }
          };
@@ -167,9 +170,15 @@ impl SecureMemory {
          out.extend_from_slice(&result);
          Ok(out)
      }
-    fn unciphering(&self, cipher: &Aes256Gcm, buffer: &Vec<u8>) -> Result<Vec<u8>, Error>
+    fn unciphering(&self, cipher: &Aes256Gcm, mut buffer: &Vec<u8>) -> Result<Vec<u8>, Error>
     {
-        let nonce_byte_array: [u8; NONCE_LEN] = buffer[0..NONCE_LEN].try_into().unwrap();
+        // ✅ SÉCURITÉ : Gestion d'erreur propre au lieu de unwrap
+        let nonce_byte_array: [u8; NONCE_LEN] = buffer[0..NONCE_LEN]
+            .try_into()
+            .map_err(|_| {
+                eprintln!("Invalid nonce length in encrypted data");
+                Error
+            })?;
         let msg = &buffer[NONCE_LEN..];  // Le reste est ciphertext + tag
         let nonce = Nonce::from_slice(&nonce_byte_array);
 
@@ -181,7 +190,8 @@ impl SecureMemory {
         let result = match cipher.decrypt(nonce, Payload { msg, aad: &aad }) {
             Ok(res) => res,
             Err(err) => {
-                println!("Error during decryption: {}", err);
+                // ✅ SÉCURITÉ : Pas de fuite d'information détaillée
+                eprintln!("Cryptographic operation failed");
                 return Err(err);
             }
         };
@@ -194,7 +204,16 @@ impl SecureMemory {
           unsafe {
               // Vérifier l'intégrité des canaries AVANT tout accès
               if !self.check_canaries() {
-                  panic!("SECURITY VIOLATION: Buffer overflow detected! Canaries have been corrupted.");
+                  // ✅ SÉCURITÉ CRITIQUE : Zeroize immédiat et abort
+                  unsafe {
+                      let slice = std::slice::from_raw_parts_mut(
+                          self.ptr.as_ptr(),
+                          self.ptr_size
+                      );
+                      slice.zeroize();
+                  }
+                  eprintln!("SECURITY VIOLATION: Buffer overflow detected! Terminating immediately.");
+                  std::process::abort(); // Pas d'interception possible
               }
 
               let data_size = NONCE_LEN + self.size + GCM_TAG_LEN;
@@ -224,8 +243,24 @@ impl SecureMemory {
               f(plaintext.as_mut_slice());
 
               // Re-chiffrement des données (seulement self.size octets, pas plus)
-              let ciphertext = self.ciphering(&self.cipher, &plaintext[..self.size])
-                  .expect("Encryption failed");
+              // ✅ SÉCURITÉ CRITIQUE : Gestion d'erreur avec zeroization
+              let ciphertext = match self.ciphering(&self.cipher, &plaintext[..self.size]) {
+                  Ok(ct) => ct,
+                  Err(_) => {
+                      // Corruption critique du système crypto
+                      plaintext.zeroize();
+                      vec.zeroize();
+                      unsafe {
+                          let slice = std::slice::from_raw_parts_mut(
+                              self.ptr.as_ptr(),
+                              self.ptr_size
+                          );
+                          slice.zeroize();
+                      }
+                      eprintln!("CRITICAL: Encryption failed! Terminating immediately.");
+                      std::process::abort();
+                  }
+              };
 
               // Copier le ciphertext dans la zone de données (après write_once flag)
               let copy_len = ciphertext.len().min(data_size);
@@ -242,7 +277,16 @@ impl SecureMemory {
 
               // Vérifier l'intégrité des canaries APRÈS l'opération
               if !self.check_canaries() {
-                  panic!("SECURITY VIOLATION: Buffer overflow detected after operation! Canaries have been corrupted.");
+                  // ✅ SÉCURITÉ CRITIQUE : Zeroize immédiat et abort
+                  unsafe {
+                      let slice = std::slice::from_raw_parts_mut(
+                          self.ptr.as_ptr(),
+                          self.ptr_size
+                      );
+                      slice.zeroize();
+                  }
+                  eprintln!("SECURITY VIOLATION: Buffer overflow detected after operation! Terminating immediately.");
+                  std::process::abort(); // Pas d'interception possible
               }
         }
     }
