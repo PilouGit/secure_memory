@@ -1,177 +1,177 @@
-# Vérification de la Sécurité Mémoire
+# Memory Security Verification
 
-Ce guide explique comment vérifier que `SecureMemory` ne laisse pas de traces des secrets en mémoire.
+This guide explains how to verify that `SecureMemory` does not leave traces of secrets in memory.
 
-## Pourquoi vérifier la mémoire ?
+## Why Verify Memory?
 
-Lorsque vous stockez des mots de passe ou autres données sensibles dans une JVM, elles peuvent persister dans :
-- **La heap JVM** : objets String, tableaux de bytes
-- **La mémoire native** : allocations via JNI/JNA
-- **Les core dumps** : si le processus crash
-- **Le swap** : si la mémoire est swappée sur disque
+When you store passwords or other sensitive data in a JVM, they can persist in:
+- **JVM heap**: String objects, byte arrays
+- **Native memory**: allocations via JNI/JNA
+- **Core dumps**: if the process crashes
+- **Swap**: if memory is swapped to disk
 
-`SecureMemory` est conçu pour :
-1. Stocker les données en **mémoire native** (hors heap JVM)
-2. **Verrouiller** la mémoire pour éviter le swap (`mlock`)
-3. **Effacer** (zero) la mémoire lors de la libération
-4. **Détecter la corruption** avec des canaries
+`SecureMemory` is designed to:
+1. Store data in **native memory** (outside JVM heap)
+2. **Lock** memory to prevent swapping (`mlock`)
+3. **Zero** memory on release
+4. **Detect corruption** with canaries
 
-## Méthodes de Vérification
+## Verification Methods
 
-### Méthode 1 : Test Automatisé avec Script
+### Method 1: Automated Test with Script
 
-Le moyen le plus simple est d'utiliser le script fourni :
+The easiest way is to use the provided script:
 
 ```bash
 cd java
 ./verify-memory-security.sh
 ```
 
-Ce script va :
-1. Démarrer un programme Java avec SecureMemory
-2. Créer un dump de la heap
-3. Chercher le secret dans le dump
-4. Rapporter si le secret a été trouvé ou non
+This script will:
+1. Start a Java program with SecureMemory
+2. Create a heap dump
+3. Search for the secret in the dump
+4. Report whether the secret was found or not
 
-**Résultat attendu** : Le secret ne devrait **PAS** être trouvé dans la heap.
+**Expected result**: The secret should **NOT** be found in the heap.
 
-### Méthode 2 : Vérification Manuelle avec jmap
+### Method 2: Manual Verification with jmap
 
-#### Étape 1 : Compiler et exécuter le programme de test
+#### Step 1: Compile and run the test program
 
 ```bash
 cd java
 mvn compile
 
-# Exécuter MemoryLeakDemo
+# Run MemoryLeakDemo
 java -cp target/classes:$(mvn dependency:build-classpath -q -DincludeScope=runtime -Dmdep.outputFile=/dev/stdout) \
-    com.securememory.MemoryLeakDemo
+    io.github.pilougit.security.MemoryLeakDemo
 ```
 
-Le programme affichera son PID et attendra 60 secondes.
+The program will display its PID and wait 60 seconds.
 
-#### Étape 2 : Créer un heap dump
+#### Step 2: Create a heap dump
 
-Dans un autre terminal :
+In another terminal:
 
 ```bash
-# Remplacer <PID> par le PID affiché
+# Replace <PID> with the displayed PID
 jmap -dump:format=b,file=heap.hprof <PID>
 ```
 
-#### Étape 3 : Rechercher le secret dans le heap dump
+#### Step 3: Search for the secret in the heap dump
 
 ```bash
-# Chercher le mot de passe dans le dump
+# Search for the password in the dump
 strings heap.hprof | grep "MyTopSecretPassword@2025!"
 
-# Si TROUVÉ : le secret a fuité (String normal)
-# Si NON TROUVÉ : le secret a été effacé (SecureMemory)
+# If FOUND: the secret leaked (normal String)
+# If NOT FOUND: the secret was erased (SecureMemory)
 ```
 
-### Méthode 3 : VisualVM (Interface Graphique)
+### Method 3: VisualVM (GUI)
 
-1. **Démarrer VisualVM** :
+1. **Start VisualVM**:
    ```bash
    jvisualvm
    ```
 
-2. **Attacher au processus Java** :
-   - Sélectionner le processus dans la liste
-   - Cliquer sur "Heap Dump"
+2. **Attach to the Java process**:
+   - Select the process from the list
+   - Click "Heap Dump"
 
-3. **Analyser le dump** :
-   - Onglet "Classes" → chercher `String`
-   - Onglet "Instances" → examiner les valeurs
-   - Utiliser la recherche OQL (Object Query Language) :
+3. **Analyze the dump**:
+   - "Classes" tab → search for `String`
+   - "Instances" tab → examine values
+   - Use OQL (Object Query Language) search:
      ```javascript
      select s from java.lang.String s where s.toString().contains("MyTopSecret")
      ```
 
-4. **Résultat attendu** :
-   - Le secret stocké dans un `String` normal sera trouvé
-   - Le secret stocké dans `SecureMemory` ne sera **PAS** trouvé
+4. **Expected result**:
+   - Secret stored in a normal `String` will be found
+   - Secret stored in `SecureMemory` will **NOT** be found
 
-### Méthode 4 : Vérification de la Mémoire Native (Linux)
+### Method 4: Native Memory Verification (Linux)
 
-Cette méthode nécessite les permissions root.
+This method requires root permissions.
 
-#### Option A : Créer un core dump
+#### Option A: Create a core dump
 
 ```bash
-# Obtenir le PID du processus Java
+# Get the Java process PID
 PID=$(jps | grep MemoryLeakDemo | awk '{print $1}')
 
-# Créer un core dump
+# Create a core dump
 sudo gcore $PID
 
-# Chercher le secret dans le core dump
+# Search for the secret in the core dump
 strings core.$PID | grep "MyTopSecretPassword@2025!"
 ```
 
-#### Option B : Lire /proc/[pid]/mem
+#### Option B: Read /proc/[pid]/mem
 
 ```bash
-# Chercher directement dans la mémoire du processus
+# Search directly in process memory
 sudo grep -a "MyTopSecretPassword@2025!" /proc/$PID/mem 2>/dev/null && echo "FOUND" || echo "NOT FOUND"
 ```
 
-**Note** : Cette méthode peut trouver le secret même après qu'il ait été effacé de la heap JVM, car :
-- Les chaînes de caractères dans les messages de log
-- Les copies temporaires créées pour l'affichage
-- La mémoire native de SecureMemory **avant** son `close()`
+**Note**: This method may find the secret even after it has been erased from the JVM heap, because of:
+- Strings in log messages
+- Temporary copies created for display
+- SecureMemory native memory **before** its `close()`
 
-### Méthode 5 : Test Programmatique avec MemorySecurityTester
+### Method 5: Programmatic Test with MemorySecurityTester
 
 ```bash
 cd java
 mvn compile
 
 java -cp target/classes:$(mvn dependency:build-classpath -q -DincludeScope=runtime -Dmdep.outputFile=/dev/stdout) \
-    com.securememory.MemorySecurityTester
+    io.github.pilougit.security.MemorySecurityTester
 ```
 
-Ce programme va :
-1. Créer un String normal et vérifier qu'il persiste en mémoire
-2. Créer un SecureMemory et vérifier qu'il ne persiste pas
-3. Afficher les résultats
+This program will:
+1. Create a normal String and verify it persists in memory
+2. Create a SecureMemory and verify it does not persist
+3. Display the results
 
-## Tests Unitaires
+## Unit Tests
 
-Les tests unitaires vérifient le comportement de SecureMemory :
+Unit tests verify SecureMemory behavior:
 
 ```bash
 cd java
 mvn test
 ```
 
-Tests inclus :
-- `testBasicReadWrite` : lecture/écriture de base
-- `testMemoryIsZeroedAfterClose` : vérification que close() rend les opérations impossibles
-- `testCanaryDetection` : détection de corruption
-- `testZeroingByteArrays` : effacement manuel des byte arrays
+Included tests:
+- `testBasicReadWrite`: basic read/write operations
+- `testMemoryIsZeroedAfterClose`: verify close() makes operations impossible
+- `testCanaryDetection`: corruption detection
+- `testZeroingByteArrays`: manual byte array zeroing
 
-## Bonnes Pratiques
+## Best Practices
 
-### ✅ FAIRE
+### ✅ DO
 
 ```java
-// 1. Utiliser try-with-resources pour fermeture automatique
+// 1. Use try-with-resources for automatic cleanup
 try (SecureMemory sm = new SecureMemory(256)) {
     sm.write(password.getBytes(StandardCharsets.UTF_8));
     byte[] data = sm.read();
 
-    // Utiliser les données
+    // Use the data
     processPassword(data);
 
-    // Effacer le tableau immédiatement après usage
+    // Clear the array immediately after use
     for (int i = 0; i < data.length; i++) {
         data[i] = 0;
     }
 }
-// SecureMemory est automatiquement fermé et effacé ici
+// SecureMemory is automatically closed and zeroed here
 
-// 2. Effacer les tableaux de bytes après usage
+// 2. Clear byte arrays after use
 byte[] sensitive = getSensitiveData();
 try {
     useSensitiveData(sensitive);
@@ -181,10 +181,10 @@ try {
     }
 }
 
-// 3. Utiliser char[] au lieu de String pour les mots de passe
+// 3. Use char[] instead of String for passwords
 char[] password = getPasswordFromUser();
 try {
-    // Convertir en bytes pour SecureMemory
+    // Convert to bytes for SecureMemory
     byte[] passwordBytes = new String(password).getBytes(StandardCharsets.UTF_8);
     try (SecureMemory sm = new SecureMemory(256)) {
         sm.write(passwordBytes);
@@ -201,89 +201,89 @@ try {
 }
 ```
 
-### ❌ NE PAS FAIRE
+### ❌ DON'T
 
 ```java
-// 1. NE PAS utiliser String pour les secrets
-String password = "MyPassword123!"; // RESTE EN MÉMOIRE !
+// 1. DON'T use String for secrets
+String password = "MyPassword123!"; // STAYS IN MEMORY!
 
-// 2. NE PAS oublier de fermer SecureMemory
+// 2. DON'T forget to close SecureMemory
 SecureMemory sm = new SecureMemory(256);
 sm.write(data);
-// ... Oubli de close() → fuite de mémoire
+// ... Forgot close() → memory leak
 
-// 3. NE PAS logger ou afficher les secrets
-System.out.println("Password: " + password); // RESTE EN MÉMOIRE !
-logger.info("Secret: {}", secret); // RESTE EN MÉMOIRE !
+// 3. DON'T log or print secrets
+System.out.println("Password: " + password); // STAYS IN MEMORY!
+logger.info("Secret: {}", secret); // STAYS IN MEMORY!
 
-// 4. NE PAS réutiliser SecureMemory après close()
+// 4. DON'T reuse SecureMemory after close()
 try (SecureMemory sm = new SecureMemory(256)) {
     sm.write(data);
 }
-sm.read(); // ERREUR : déjà fermé
+sm.read(); // ERROR: already closed
 ```
 
-## Limites de la Vérification
+## Verification Limitations
 
-### Ce qui peut causer des faux positifs :
+### What can cause false positives:
 
-1. **String interning** : La JVM peut mettre en cache les String dans le pool
-2. **Messages de log** : Les logs peuvent contenir des copies du secret
-3. **Stack traces** : Les exceptions peuvent capturer des valeurs
-4. **Garbage collector** : Les données peuvent persister jusqu'au GC
-5. **JIT compilation** : Le compilateur peut créer des copies temporaires
-6. **Debugger** : Les variables inspectées persistent en mémoire
+1. **String interning**: JVM may cache Strings in the pool
+2. **Log messages**: Logs may contain copies of the secret
+3. **Stack traces**: Exceptions may capture values
+4. **Garbage collector**: Data may persist until GC
+5. **JIT compilation**: Compiler may create temporary copies
+6. **Debugger**: Inspected variables persist in memory
 
-### Solutions :
+### Solutions:
 
-- **Éviter String** : Utiliser `char[]` ou `byte[]`
-- **Éviter les logs** : Ne jamais logger de secrets
-- **Effacer rapidement** : Zéroer les tableaux immédiatement après usage
-- **Forcer le GC** : Appeler `System.gc()` (pas garanti)
-- **Désactiver le JIT pour les tests** : `-Xint` (très lent)
+- **Avoid String**: Use `char[]` or `byte[]`
+- **Avoid logs**: Never log secrets
+- **Clear quickly**: Zero arrays immediately after use
+- **Force GC**: Call `System.gc()` (not guaranteed)
+- **Disable JIT for tests**: `-Xint` (very slow)
 
-## Outils Complémentaires
+## Additional Tools
 
 ### Memory Analyzer Tool (MAT)
 
 ```bash
-# Télécharger MAT : https://eclipse.dev/mat/
-# Analyser un heap dump
+# Download MAT: https://eclipse.dev/mat/
+# Analyze a heap dump
 java -jar mat/MemoryAnalyzer.jar heap.hprof
 ```
 
-### GDB (pour débugger la mémoire native)
+### GDB (for native memory debugging)
 
 ```bash
-# Attacher GDB au processus
+# Attach GDB to the process
 sudo gdb -p <PID>
 
-# Chercher une chaîne en mémoire
+# Search for a string in memory
 (gdb) find /s 0x7f0000000000, 0x7fffffffffff, "MyTopSecret"
 
-# Examiner la mémoire à une adresse
+# Examine memory at an address
 (gdb) x/100s 0x7ffff7a00000
 ```
 
-## Interprétation des Résultats
+## Results Interpretation
 
-| Résultat | Signification | Action |
-|----------|---------------|--------|
-| Secret trouvé dans heap après String | Normal | String n'est pas sécurisé, utiliser SecureMemory |
-| Secret trouvé dans heap après SecureMemory.close() | **PROBLÈME** | Bug dans SecureMemory, investiguer |
-| Secret NON trouvé dans heap après SecureMemory.close() | **CORRECT** | SecureMemory fonctionne correctement |
-| Secret trouvé dans /proc/mem avant close() | Normal | SecureMemory est encore ouvert |
-| Secret trouvé dans /proc/mem après close() | **PROBLÈME** | Le zeroing n'a pas fonctionné |
+| Result | Meaning | Action |
+|--------|---------|--------|
+| Secret found in heap after String | Normal | String is not secure, use SecureMemory |
+| Secret found in heap after SecureMemory.close() | **PROBLEM** | Bug in SecureMemory, investigate |
+| Secret NOT found in heap after SecureMemory.close() | **CORRECT** | SecureMemory works correctly |
+| Secret found in /proc/mem before close() | Normal | SecureMemory is still open |
+| Secret found in /proc/mem after close() | **PROBLEM** | Zeroing did not work |
 
 ## Conclusion
 
-Pour une sécurité maximale :
+For maximum security:
 
-1. ✅ Utiliser `SecureMemory` pour les données sensibles
-2. ✅ Toujours utiliser `try-with-resources`
-3. ✅ Effacer les `byte[]` immédiatement après usage
-4. ✅ Éviter `String` pour les secrets
-5. ✅ Ne jamais logger ou afficher des secrets
-6. ✅ Tester régulièrement avec les outils de vérification
+1. ✅ Use `SecureMemory` for sensitive data
+2. ✅ Always use `try-with-resources`
+3. ✅ Clear `byte[]` immediately after use
+4. ✅ Avoid `String` for secrets
+5. ✅ Never log or print secrets
+6. ✅ Test regularly with verification tools
 
-La sécurité de la mémoire est un processus continu. Utilisez ces outils régulièrement pour vérifier qu'aucun secret ne fuite.
+Memory security is an ongoing process. Use these tools regularly to verify that no secrets leak.

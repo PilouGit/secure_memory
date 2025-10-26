@@ -23,33 +23,18 @@
 #![warn(clippy::pedantic)]
 #![warn(clippy::nursery)]
 
-/// Secure buffer implementation
-pub mod buffer;
-/// Error types and handling
-pub mod error;
+
 /// Utility functions for secure operations
 pub mod utils;
-/// TPM crypto operations
-pub mod tpmcrypto;
+/// TPM service for cryptographic operations
+pub mod tpm_service;
 /// Secure key operation
 pub mod secure_key;
 /// Secure Memory buffer
 pub mod secure_memory;
 /// FFI interface for SecureMemory (C-compatible for JNA/JNI)
 pub mod secure_memory_ffi;
-pub mod tpm_process_auth;
+pub mod process_key_deriver;
 
 pub mod secure_error;
-pub use buffer::SecureBuffer;
-pub use error::{Error, Result};
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_basic_functionality() {
-        let buffer = SecureBuffer::new(100);
-        assert_eq!(buffer.len(), 100);
-    }
-}

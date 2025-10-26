@@ -1,6 +1,7 @@
 /// FFI interface for SecureMemory - C-compatible bindings for use with JNA/JNI
 use std::ptr;
 use crate::secure_memory::SecureMemory;
+use crate::tpm_service;
 
 /// Opaque handle to SecureMemory for FFI
 /// This ensures the Java side cannot directly access the Rust structure
@@ -190,4 +191,20 @@ pub extern "C" fn secure_memory_size(handle: *const SecureMemoryHandle) -> usize
         let mem = &*(handle as *const SecureMemory);
         mem.get_size()
     }
+}
+
+/// Cleanup TPM resources
+///
+/// This function should be called when the application is shutting down
+/// to properly clean up TPM resources and flush all keys.
+///
+/// **IMPORTANT**: This must be called before the JVM exits to ensure
+/// proper cleanup of TPM handles and sessions.
+///
+/// # Safety
+/// This function is thread-safe but should only be called once during
+/// application shutdown.
+#[no_mangle]
+pub extern "C" fn secure_memory_cleanup_tpm() {
+    tpm_service::reset_service();
 }

@@ -12,7 +12,7 @@
         <relativePath/>
     </parent>
 
-    <groupId>com.securememory</groupId>
+    <groupId>io.github.pilougit.security</groupId>
     <artifactId>springboot-example</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
@@ -49,7 +49,7 @@
 
         <!-- SecureMemory Java bindings (local) -->
         <dependency>
-            <groupId>com.securememory</groupId>
+            <groupId>io.github.pilougit.security</groupId>
             <artifactId>secure-memory-java</artifactId>
             <version>1.0.0</version>
             <scope>system</scope>

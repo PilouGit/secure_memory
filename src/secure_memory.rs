@@ -3,9 +3,9 @@ use std::ptr::NonNull;
 use crate::secure_key::SecureKey;
 use libc;
 
-use aes_gcm::{aead::{Aead, KeyInit, Payload}, Aes256Gcm, Error, Key, Nonce};
-use rand::{rand_core::OsRng, TryRngCore};
+use aes_gcm::{aead::{Aead, KeyInit, Payload}, Aes256Gcm, Error, Nonce};
 use zeroize::Zeroize;
+use crate::tpm_service::get_service;
 
 // Constantes pour AES-GCM
 const NONCE_LEN: usize = 12;        // Taille du nonce pour AES-GCM (96 bits)
@@ -15,16 +15,30 @@ const AAD_VERSION: &[u8] = b"SecureMemory_v2";
 
 // Constantes pour les canaries de protection
 const CANARY_SIZE: usize = 8;       // Taille du canary (64 bits)
-/// SecureMemory with buffer overflow protection using canaries
+
+/// Get the system page size
+fn get_page_size() -> usize {
+    unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize }
+}
+
+/// Round up size to next page boundary
+fn round_to_page_size(size: usize) -> usize {
+    let page_size = get_page_size();
+    (size + page_size - 1) / page_size * page_size
+}
+
+/// SecureMemory with buffer overflow protection using canaries and mmap-based memory protection
 pub struct SecureMemory {
     ptr: NonNull<u8>,
     size: usize,
     ptr_size: usize,
-    cipher: Aes256Gcm,
+    mapped_size: usize,  // Taille arrondie à la page (pour munmap)
+    ciphered_key: Vec<u8>,
     canary_start: u64,  // Canary placé au début du buffer
     canary_end: u64,    // Canary placé à la fin du buffer
     write_once: bool,   // Flag pour indiquer si la mémoire est write-once
-    has_been_written: bool, // Flag pour tracker si une écriture a déjà eu lieu
+    has_been_written: bool,
+     // Flag pour tracker si une écriture a déjà eu lieu
 }
 
 impl SecureMemory {
@@ -49,26 +63,56 @@ impl SecureMemory {
             return None;
         }
 
-         // ✅ SÉCURITÉ CRITIQUE : Gérer l'échec de génération de clé
-         let key = SecureKey::new()?;
+        // ✅ SÉCURITÉ CRITIQUE : Gérer l'échec de génération de clé
+        let key = SecureKey::new()?;
 
-         unsafe {
-            let cipher_key = Key::<Aes256Gcm>::from_slice(key.as_slice());
+        unsafe {
+            let key_buff = key.as_slice();
+            let tpm = get_service();
+            let ciphered_key = tpm.ciphering(key_buff.to_vec());
 
             // Format stocké avec canaries:
             // [canary_start (8)] + [write_once_flag (1)] + [nonce (12) + ciphertext (size) + gcm_tag (16)] + [canary_end (8)]
             let data_size = NONCE_LEN + size + GCM_TAG_LEN;
             let ptr_size = CANARY_SIZE + 1 + data_size + CANARY_SIZE; // +1 pour write_once flag
-            let ptr = libc::malloc(ptr_size);
 
-            if ptr.is_null() { return None; }
-            let cipher = Aes256Gcm::new(cipher_key);
+            // 🛡️ SÉCURITÉ CRITIQUE : Utiliser mmap() au lieu de malloc()
+            // Arrondir à la taille de page pour mmap
+            let mapped_size = round_to_page_size(ptr_size);
 
-            // Générer des canaries aléatoires
+            // Allouer avec mmap et PROT_NONE (aucun accès par défaut)
+            let ptr = libc::mmap(
+                std::ptr::null_mut(),
+                mapped_size,
+                libc::PROT_NONE,  // 🔒 Aucun accès par défaut !
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1,
+                0
+            );
+
+            if ptr == libc::MAP_FAILED { return None; }
+
+            // 🔒 SÉCURITÉ CRITIQUE : Locker la mémoire pour empêcher le swap sur disque
+            // Cela empêche les secrets d'être écrits dans le fichier de swap
+            let mlock_result = libc::mlock(ptr as *const libc::c_void, mapped_size);
+            if mlock_result != 0 {
+                // mlock() a échoué - probablement pas de permissions (RLIMIT_MEMLOCK)
+                // On continue quand même mais on log un warning
+                eprintln!("⚠️  WARNING: mlock() failed - memory may be swapped to disk!");
+                eprintln!("   Consider running with CAP_IPC_LOCK or increasing RLIMIT_MEMLOCK");
+            }
+
+            // 🔓 Temporairement autoriser l'écriture pour l'initialisation
+            if libc::mprotect(ptr, mapped_size, libc::PROT_READ | libc::PROT_WRITE) != 0 {
+                libc::munmap(ptr, mapped_size);
+                return None;
+            }
+
+            // Générer des canaries aléatoires via TPM
             let mut canary_start_bytes = [0u8; 8];
             let mut canary_end_bytes = [0u8; 8];
-            OsRng.try_fill_bytes(&mut canary_start_bytes).ok()?;
-            OsRng.try_fill_bytes(&mut canary_end_bytes).ok()?;
+            tpm.random(&mut canary_start_bytes).ok()?;
+            tpm.random(&mut canary_end_bytes).ok()?;
 
             let canary_start = u64::from_le_bytes(canary_start_bytes);
             let canary_end = u64::from_le_bytes(canary_end_bytes);
@@ -84,11 +128,18 @@ impl SecureMemory {
             // Initialiser la zone de données à zéro (entre write_once flag et canary_end)
             std::ptr::write_bytes((ptr as *mut u8).add(CANARY_SIZE + 1), 0, data_size);
 
+            // 🔒 Remettre en PROT_NONE après l'initialisation
+            if libc::mprotect(ptr, mapped_size, libc::PROT_NONE) != 0 {
+                libc::munmap(ptr, mapped_size);
+                return None;
+            }
+
             Some(Self {
                 ptr: NonNull::new(ptr as *mut u8)?,
                 size,
                 ptr_size,
-                cipher,
+                mapped_size,
+                ciphered_key,
                 canary_start,
                 canary_end,
                 write_once,
@@ -101,6 +152,12 @@ impl SecureMemory {
      /// Retourne true si les canaries sont intacts, false si corruption détectée
      fn check_canaries(&self) -> bool {
         unsafe {
+            // 🔓 Autoriser temporairement la lecture pour vérifier les canaries
+            if libc::mprotect(self.ptr.as_ptr() as *mut libc::c_void, self.mapped_size, libc::PROT_READ) != 0 {
+                eprintln!("⚠️ WARNING: mprotect(PROT_READ) failed in check_canaries");
+                return false;
+            }
+
             let data_size = NONCE_LEN + self.size + GCM_TAG_LEN;
 
             // Lire le canary au début
@@ -113,6 +170,11 @@ impl SecureMemory {
             let stored_canary_end = std::ptr::read(
                 (self.ptr.as_ptr() as *const u8).add(CANARY_SIZE + 1 + data_size) as *const u64
             );
+
+            // 🔒 Remettre en PROT_NONE immédiatement
+            if libc::mprotect(self.ptr.as_ptr() as *mut libc::c_void, self.mapped_size, libc::PROT_NONE) != 0 {
+                eprintln!("⚠️ WARNING: mprotect(PROT_NONE) failed in check_canaries");
+            }
 
             // Vérifier que les canaries n'ont pas été modifiés
             let canaries_ok = stored_canary_start == self.canary_start && stored_canary_end == self.canary_end;
@@ -144,12 +206,15 @@ impl SecureMemory {
          aad
      }
 
-     fn ciphering(&self, cipher: &Aes256Gcm, buffer: &[u8]) -> Result<Vec<u8>, Error>
-     {
-         let mut nonce_byte_array = [0u8; NONCE_LEN];
-         OsRng.try_fill_bytes(&mut nonce_byte_array)
-             .map_err(|_| Error)?;
-         let nonce = Nonce::from_slice(&nonce_byte_array);
+    fn ciphering(&self, buffer: &[u8]) -> Result<Vec<u8>, Error> {
+        let tpm = get_service();
+        let unciphered_key = tpm.unciphering(self.ciphered_key.clone());
+        let cipher = Aes256Gcm::new_from_slice(&unciphered_key).unwrap();
+
+        // Générer un nonce aléatoire via TPM
+        let mut nonce_byte_array = [0u8; NONCE_LEN];
+        tpm.random(&mut nonce_byte_array).map_err(|_| Error)?;
+        let nonce = Nonce::from_slice(&nonce_byte_array);
 
          // Construire l'AAD avec les canaries et write_once
          let aad = self.build_aad();
@@ -170,8 +235,10 @@ impl SecureMemory {
          out.extend_from_slice(&result);
          Ok(out)
      }
-    fn unciphering(&self, cipher: &Aes256Gcm, mut buffer: &Vec<u8>) -> Result<Vec<u8>, Error>
-    {
+    fn unciphering(&self, buffer: &Vec<u8>) -> Result<Vec<u8>, Error> {
+        let tpm = get_service();
+        let unciphered_key = tpm.unciphering(self.ciphered_key.clone());
+        let cipher = Aes256Gcm::new_from_slice(&unciphered_key).unwrap();
         // ✅ SÉCURITÉ : Gestion d'erreur propre au lieu de unwrap
         let nonce_byte_array: [u8; NONCE_LEN] = buffer[0..NONCE_LEN]
             .try_into()
@@ -205,18 +272,24 @@ impl SecureMemory {
               // Vérifier l'intégrité des canaries AVANT tout accès
               if !self.check_canaries() {
                   // ✅ SÉCURITÉ CRITIQUE : Zeroize immédiat et abort
-                  unsafe {
-                      let slice = std::slice::from_raw_parts_mut(
-                          self.ptr.as_ptr(),
-                          self.ptr_size
-                      );
-                      slice.zeroize();
-                  }
+                  // Autoriser temporairement l'écriture pour zeroize
+                  libc::mprotect(self.ptr.as_ptr() as *mut libc::c_void, self.mapped_size, libc::PROT_WRITE);
+                  let slice = std::slice::from_raw_parts_mut(
+                      self.ptr.as_ptr(),
+                      self.ptr_size
+                  );
+                  slice.zeroize();
                   eprintln!("SECURITY VIOLATION: Buffer overflow detected! Terminating immediately.");
                   std::process::abort(); // Pas d'interception possible
               }
 
               let data_size = NONCE_LEN + self.size + GCM_TAG_LEN;
+
+              // 🔓 PHASE 1 : Autoriser READ pour lire les données chiffrées
+              if libc::mprotect(self.ptr.as_ptr() as *mut libc::c_void, self.mapped_size, libc::PROT_READ) != 0 {
+                  eprintln!("CRITICAL: mprotect(PROT_READ) failed!");
+                  std::process::abort();
+              }
 
               // Lire la zone de données (après canary_start + write_once flag)
               let data_ptr = self.ptr.as_ptr().add(CANARY_SIZE + 1); // +1 pour le flag write_once
@@ -225,11 +298,18 @@ impl SecureMemory {
               let mut vec = Vec::with_capacity(data_size);
               vec.extend_from_slice(slice);
 
+              // 🔒 Remettre en PROT_NONE après la lecture
+              if libc::mprotect(self.ptr.as_ptr() as *mut libc::c_void, self.mapped_size, libc::PROT_NONE) != 0 {
+                  eprintln!("CRITICAL: mprotect(PROT_NONE) failed after read!");
+                  std::process::abort();
+              }
+
               // Tenter de déchiffrer
               // Si le déchiffrement échoue (première utilisation ou données corrompues),
               // utiliser un buffer vide/zéro
               let mut plaintext = if vec.len() >= NONCE_LEN + GCM_TAG_LEN {
-                  self.unciphering(&self.cipher, &vec)
+
+                  self.unciphering( &vec)
                       .unwrap_or_else(|_| vec![0u8; self.size])
               } else {
                   // Première utilisation - buffer initialisé à zéro
@@ -244,23 +324,29 @@ impl SecureMemory {
 
               // Re-chiffrement des données (seulement self.size octets, pas plus)
               // ✅ SÉCURITÉ CRITIQUE : Gestion d'erreur avec zeroization
-              let ciphertext = match self.ciphering(&self.cipher, &plaintext[..self.size]) {
+              let ciphertext = match self.ciphering(&plaintext[..self.size]) {
                   Ok(ct) => ct,
                   Err(_) => {
                       // Corruption critique du système crypto
                       plaintext.zeroize();
                       vec.zeroize();
-                      unsafe {
-                          let slice = std::slice::from_raw_parts_mut(
-                              self.ptr.as_ptr(),
-                              self.ptr_size
-                          );
-                          slice.zeroize();
-                      }
+                      // Autoriser temporairement l'écriture pour zeroize
+                      libc::mprotect(self.ptr.as_ptr() as *mut libc::c_void, self.mapped_size, libc::PROT_WRITE);
+                      let slice = std::slice::from_raw_parts_mut(
+                          self.ptr.as_ptr(),
+                          self.ptr_size
+                      );
+                      slice.zeroize();
                       eprintln!("CRITICAL: Encryption failed! Terminating immediately.");
                       std::process::abort();
                   }
               };
+
+              // 🔓 PHASE 2 : Autoriser WRITE pour écrire les données chiffrées
+              if libc::mprotect(self.ptr.as_ptr() as *mut libc::c_void, self.mapped_size, libc::PROT_WRITE) != 0 {
+                  eprintln!("CRITICAL: mprotect(PROT_WRITE) failed!");
+                  std::process::abort();
+              }
 
               // Copier le ciphertext dans la zone de données (après write_once flag)
               let copy_len = ciphertext.len().min(data_size);
@@ -270,6 +356,12 @@ impl SecureMemory {
                   copy_len
               );
 
+              // 🔒 Remettre en PROT_NONE immédiatement après l'écriture
+              if libc::mprotect(self.ptr.as_ptr() as *mut libc::c_void, self.mapped_size, libc::PROT_NONE) != 0 {
+                  eprintln!("CRITICAL: mprotect(PROT_NONE) failed after write!");
+                  std::process::abort();
+              }
+
               // Si c'était une écriture, marquer comme écrit
               if is_write {
                   self.has_been_written = true;
@@ -278,13 +370,13 @@ impl SecureMemory {
               // Vérifier l'intégrité des canaries APRÈS l'opération
               if !self.check_canaries() {
                   // ✅ SÉCURITÉ CRITIQUE : Zeroize immédiat et abort
-                  unsafe {
-                      let slice = std::slice::from_raw_parts_mut(
-                          self.ptr.as_ptr(),
-                          self.ptr_size
-                      );
-                      slice.zeroize();
-                  }
+                  // Autoriser temporairement l'écriture pour zeroize
+                  libc::mprotect(self.ptr.as_ptr() as *mut libc::c_void, self.mapped_size, libc::PROT_WRITE);
+                  let slice = std::slice::from_raw_parts_mut(
+                      self.ptr.as_ptr(),
+                      self.ptr_size
+                  );
+                  slice.zeroize();
                   eprintln!("SECURITY VIOLATION: Buffer overflow detected after operation! Terminating immediately.");
                   std::process::abort(); // Pas d'interception possible
               }
@@ -327,11 +419,28 @@ impl Drop for SecureMemory {
             eprintln!("WARNING: Buffer overflow detected during drop! Canaries corrupted.");
         }
 
-        // Zero out sensitive data (toute la zone incluant les canaries)
         unsafe {
+            // 🔓 Autoriser WRITE pour zeroize
+            if libc::mprotect(self.ptr.as_ptr() as *mut libc::c_void, self.mapped_size, libc::PROT_WRITE) != 0 {
+                eprintln!("⚠️  WARNING: mprotect(PROT_WRITE) failed in drop");
+            }
+
+            // Zero out sensitive data (toute la zone incluant les canaries)
             let slice = std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.ptr_size);
             slice.zeroize();
-            libc::free(self.ptr.as_ptr() as *mut _);
+
+            // 🔓 Délocker la mémoire avant de la libérer
+            // Note: munlock() doit être appelé AVANT munmap() mais APRÈS zeroize()
+            let munlock_result = libc::munlock(self.ptr.as_ptr() as *const libc::c_void, self.mapped_size);
+            if munlock_result != 0 {
+                // munlock() a échoué mais ce n'est pas critique car on va libérer la mémoire
+                eprintln!("⚠️  WARNING: munlock() failed during cleanup");
+            }
+
+            // 🗑️ Libérer la mémoire mappée
+            if libc::munmap(self.ptr.as_ptr() as *mut libc::c_void, self.mapped_size) != 0 {
+                eprintln!("⚠️  WARNING: munmap() failed during cleanup");
+            }
         }
     }
 }

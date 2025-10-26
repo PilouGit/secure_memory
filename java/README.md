@@ -64,7 +64,7 @@ Create a `pom.xml` file in the `java/` directory:
          http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.securememory</groupId>
+    <groupId>io.github.pilougit.security</groupId>
     <artifactId>secure-memory-java</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
@@ -113,13 +113,13 @@ mvn clean compile
 export LD_LIBRARY_PATH=../target/release:$LD_LIBRARY_PATH
 
 # Run the example
-mvn exec:java -Dexec.mainClass="com.securememory.Example"
+mvn exec:java -Dexec.mainClass="io.github.pilougit.security.Example"
 ```
 
 ## Usage Example
 
 ```java
-import com.securememory.SecureMemory;
+import io.github.pilougit.security.SecureMemory;
 import java.nio.charset.StandardCharsets;
 
 public class MyApp {

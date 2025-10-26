@@ -1,0 +1,255 @@
+name: Build SecureMemory
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build-rust:
+    name: Build Rust Library
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+        rust: [stable, 1.70.0]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ matrix.rust }}
+        components: rustfmt, clippy
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ matrix.rust }}-
+          ${{ runner.os }}-cargo-
+
+    - name: Install TPM simulator dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          pkg-config \
+          libssl-dev \
+          libtss2-dev \
+          tpm2-tools
+
+    - name: Check Rust formatting
+      run: cargo fmt --all -- --check
+      continue-on-error: true
+
+    - name: Run Clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
+      continue-on-error: true
+
+    - name: Build Rust library (debug)
+      run: cargo build --lib --verbose
+
+    - name: Build Rust library (release)
+      run: cargo build --lib --release --verbose
+
+    - name: Run Rust tests
+      run: cargo test --lib --verbose
+      continue-on-error: true
+
+    - name: Upload Rust artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: rust-lib-${{ matrix.os }}-${{ matrix.rust }}
+        path: |
+          target/release/libsecure_memory.so
+          target/release/libsecure_memory.a
+        if-no-files-found: warn
+
+  build-java:
+    name: Build Java Bindings
+    needs: build-rust
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+        java: ['8', '11', '17', '21']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK ${{ matrix.java }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ matrix.java }}
+        distribution: 'temurin'
+        cache: 'maven'
+
+    - name: Download Rust artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: rust-lib-${{ matrix.os }}-stable
+        path: target/release/
+      continue-on-error: true
+
+    - name: Build Rust library (fallback)
+      if: steps.download-artifact.outcome == 'failure'
+      run: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source "$HOME/.cargo/env"
+        cargo build --lib --release
+
+    - name: Build Java bindings
+      working-directory: java
+      run: mvn clean package -DskipTests
+
+    - name: Run Java tests
+      working-directory: java
+      run: mvn test
+      continue-on-error: true
+
+    - name: Upload Java artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: java-jar-${{ matrix.os }}-java${{ matrix.java }}
+        path: |
+          java/target/*.jar
+          !java/target/*-javadoc.jar
+          !java/target/*-sources.jar
+        if-no-files-found: warn
+
+  build-springboot-example:
+    name: Build Spring Boot Example
+    needs: build-java
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: 'maven'
+
+    - name: Build Rust library
+      run: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source "$HOME/.cargo/env"
+        cargo build --lib --release
+
+    - name: Build Java library
+      working-directory: java
+      run: mvn clean package -DskipTests
+
+    - name: Build Spring Boot example
+      working-directory: java/springboot-example
+      run: mvn clean package -DskipTests
+
+    - name: Upload Spring Boot artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: springboot-example-${{ matrix.os }}
+        path: java/springboot-example/target/*.jar
+        if-no-files-found: warn
+
+  release:
+    name: Create Release
+    needs: [build-rust, build-java, build-springboot-example]
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts/
+
+    - name: Display structure of downloaded files
+      run: ls -R artifacts/
+
+    - name: Create release package
+      run: |
+        mkdir -p release
+        # Copy Rust libraries
+        find artifacts -name "*.so" -exec cp {} release/ \;
+        find artifacts -name "*.a" -exec cp {} release/ \;
+        # Copy Java JARs
+        find artifacts -name "*.jar" -exec cp {} release/ \;
+        # Create checksums
+        cd release
+        sha256sum * > SHA256SUMS.txt
+        cd ..
+
+    - name: Upload release artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-bundle
+        path: release/*
+        retention-days: 90
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Run cargo audit
+      run: |
+        cargo install cargo-audit
+        cargo audit
+      continue-on-error: true
+
+    - name: Run cargo deny
+      run: |
+        cargo install cargo-deny
+        cargo deny check
+      continue-on-error: true
+
+    - name: OWASP Dependency Check (Java)
+      uses: dependency-check/Dependency-Check_Action@main
+      with:
+        project: 'SecureMemory'
+        path: 'java'
+        format: 'HTML'
+      continue-on-error: true
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-reports
+        path: |
+          reports/
+        if-no-files-found: warn

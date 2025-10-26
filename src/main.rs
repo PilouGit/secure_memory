@@ -1,5 +1,5 @@
 // Temporairement désactivé - nécessite correction du type TctiNameConf
-// use secure_memory::tpmcrypto::TpmCrypto;
+// use secure_memory::tpm_service::TpmCrypto;
 // use tss_esapi::Result;
 
 fn main() {

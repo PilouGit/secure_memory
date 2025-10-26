@@ -1,6 +1,6 @@
-/// Tests pour TpmProcessAuth
+/// Tests pour ProcessKeyDeriver
 ///
-/// Ce module teste la dérivation de secrets d'authentification TPM basée sur :
+/// Ce module teste la dérivation de clés cryptographiques liées au processus basée sur :
 /// - Le hash du binaire actuel (current_exe)
 /// - Le PID du processus
 /// - Un salt aléatoire
@@ -10,7 +10,7 @@
 /// - Si le binaire change, le secret change (protection contre modification)
 /// - Le salt ajoute de l'entropie
 
-// ⚠️  Note : TpmProcessAuth n'est pas public, donc on doit le tester via les fonctions publiques
+// ⚠️  Note : ProcessKeyDeriver n'est pas public, donc on doit le tester via les fonctions publiques
 // ou rendre le module public pour les tests.
 //
 // Pour l'instant, je vais créer des tests qui couvrent la logique similaire.
@@ -22,12 +22,12 @@ use rand::TryRngCore;
 use std::{env, fs};
 use std::io::Read;
 
-/// Structure de test équivalente à TpmProcessAuth
-struct TestTpmProcessAuth {
+/// Structure de test équivalente à ProcessKeyDeriver
+struct TestProcessKeyDeriver {
     salt: Vec<u8>,
 }
 
-impl TestTpmProcessAuth {
+impl TestProcessKeyDeriver {
     /// Crée une nouvelle instance avec un salt aléatoire
     pub fn new() -> Option<Self> {
         let mut salt = vec![0u8; 32];
@@ -79,10 +79,10 @@ impl TestTpmProcessAuth {
 #[test]
 fn test_creation() {
     println!("\n╔══════════════════════════════════════════════════════════════════╗");
-    println!("║ TEST 1 : Création de TpmProcessAuth                             ║");
+    println!("║ TEST 1 : Création de ProcessKeyDeriver                          ║");
     println!("╚══════════════════════════════════════════════════════════════════╝");
 
-    let auth = TestTpmProcessAuth::new();
+    let auth = TestProcessKeyDeriver::new();
     assert!(auth.is_some(), "La création devrait réussir");
 
     let auth = auth.unwrap();
@@ -98,8 +98,8 @@ fn test_salt_randomness() {
     println!("║ TEST 2 : Caractère aléatoire du salt                            ║");
     println!("╚══════════════════════════════════════════════════════════════════╝");
 
-    let auth1 = TestTpmProcessAuth::new().unwrap();
-    let auth2 = TestTpmProcessAuth::new().unwrap();
+    let auth1 = TestProcessKeyDeriver::new().unwrap();
+    let auth2 = TestProcessKeyDeriver::new().unwrap();
 
     assert_ne!(
         auth1.salt, auth2.salt,
@@ -118,7 +118,7 @@ fn test_derive_valid_output() {
     println!("║ TEST 3 : Dérivation produit un résultat valide                  ║");
     println!("╚══════════════════════════════════════════════════════════════════╝");
 
-    let auth = TestTpmProcessAuth::new().unwrap();
+    let auth = TestProcessKeyDeriver::new().unwrap();
     let derived = auth.derive();
 
     assert!(derived.is_ok(), "La dérivation devrait réussir");
@@ -139,8 +139,8 @@ fn test_determinism_same_salt() {
 
     let fixed_salt = vec![42u8; 32];
 
-    let auth1 = TestTpmProcessAuth::with_salt(fixed_salt.clone());
-    let auth2 = TestTpmProcessAuth::with_salt(fixed_salt.clone());
+    let auth1 = TestProcessKeyDeriver::with_salt(fixed_salt.clone());
+    let auth2 = TestProcessKeyDeriver::with_salt(fixed_salt.clone());
 
     let derived1 = auth1.derive().unwrap();
     let derived2 = auth2.derive().unwrap();
@@ -165,8 +165,8 @@ fn test_different_salt_different_output() {
     let salt1 = vec![1u8; 32];
     let salt2 = vec![2u8; 32];
 
-    let auth1 = TestTpmProcessAuth::with_salt(salt1);
-    let auth2 = TestTpmProcessAuth::with_salt(salt2);
+    let auth1 = TestProcessKeyDeriver::with_salt(salt1);
+    let auth2 = TestProcessKeyDeriver::with_salt(salt2);
 
     let derived1 = auth1.derive().unwrap();
     let derived2 = auth2.derive().unwrap();
@@ -225,7 +225,7 @@ fn test_pid_included() {
     println!("✅ PID en bytes : {:02x?}", pid_bytes);
 
     // Vérifier que la dérivation fonctionne avec ce PID
-    let auth = TestTpmProcessAuth::new().unwrap();
+    let auth = TestProcessKeyDeriver::new().unwrap();
     let derived = auth.derive();
 
     assert!(derived.is_ok(), "La dérivation avec PID devrait réussir");
@@ -240,7 +240,7 @@ fn test_security_components() {
     println!("║ TEST 8 : Composants de sécurité                                 ║");
     println!("╚══════════════════════════════════════════════════════════════════╝");
 
-    let auth = TestTpmProcessAuth::new().unwrap();
+    let auth = TestProcessKeyDeriver::new().unwrap();
 
     println!("Composants de la dérivation :");
     println!("  1. Salt (32 bytes) : Aléatoire, unique par instance");
@@ -264,8 +264,8 @@ fn test_real_world_scenario() {
     println!("\nScénario : Créer un secret d'auth TPM pour ce processus\n");
 
     // Étape 1 : Créer l'instance
-    println!("1. Création de TpmProcessAuth...");
-    let auth = TestTpmProcessAuth::new().unwrap();
+    println!("1. Création de ProcessKeyDeriver...");
+    let auth = TestProcessKeyDeriver::new().unwrap();
     println!("   ✅ Salt généré : {} bytes", auth.salt.len());
 
     // Étape 2 : Dériver le secret
@@ -290,7 +290,7 @@ fn test_security_properties() {
     println!("║ TEST 10 : Propriétés de sécurité                                ║");
     println!("╚══════════════════════════════════════════════════════════════════╝");
 
-    println!("\n✅ PROPRIÉTÉS DE SÉCURITÉ DE TpmProcessAuth :\n");
+    println!("\n✅ PROPRIÉTÉS DE SÉCURITÉ DE ProcessKeyDeriver :\n");
 
     println!("1. Isolation par processus");
     println!("   • Chaque processus a un PID unique");
@@ -338,11 +338,11 @@ fn test_performance() {
 
     // Test de création
     let start = Instant::now();
-    let _auth = TestTpmProcessAuth::new().unwrap();
+    let _auth = TestProcessKeyDeriver::new().unwrap();
     let creation_time = start.elapsed();
 
     // Test de dérivation
-    let auth = TestTpmProcessAuth::new().unwrap();
+    let auth = TestProcessKeyDeriver::new().unwrap();
     let start = Instant::now();
     let _secret = auth.derive().unwrap();
     let derive_time = start.elapsed();
@@ -367,5 +367,5 @@ fn test_performance() {
 /// Test de compilation
 #[test]
 fn test_compiles() {
-    println!("✅ Tests pour TpmProcessAuth compilent correctement");
+    println!("✅ Tests pour ProcessKeyDeriver compilent correctement");
 }
