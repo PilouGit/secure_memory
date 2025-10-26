@@ -1,6 +1,7 @@
 package io.github.pilougit.security;
 
 import com.sun.jna.Pointer;
+import java.lang.ref.Cleaner;
 import java.util.Arrays;
 
 /**
@@ -27,11 +28,35 @@ import java.util.Arrays;
  */
 public class SecureMemory implements AutoCloseable {
 
+    // ✅ JAVA 9+: Cleaner API remplace finalize() déprécié
+    private static final Cleaner CLEANER = Cleaner.create();
+
     private Pointer handle;
     private final long size;
     private boolean closed = false;
     private final boolean writeOnce;
     private boolean hasBeenWritten = false;
+    private final Cleaner.Cleanable cleanable;
+
+    /**
+     * Cleanup action for Cleaner API.
+     * This runs when the object is garbage collected as a fallback if close() wasn't called.
+     */
+    private static class CleanupAction implements Runnable {
+        private final Pointer handle;
+
+        CleanupAction(Pointer handle) {
+            this.handle = handle;
+        }
+
+        @Override
+        public void run() {
+            if (handle != null) {
+                // Fallback cleanup si close() n'a pas été appelé
+                SecureMemoryNative.INSTANCE.secure_memory_free(handle);
+            }
+        }
+    }
 
     /**
      * Create a new SecureMemory instance (write_once = false).
@@ -64,6 +89,10 @@ public class SecureMemory implements AutoCloseable {
         }
 
         this.size = size;
+
+        // ✅ JAVA 9+: Enregistrer le cleaner comme fallback si close() n'est pas appelé
+        // Note: try-with-resources est toujours recommandé, ceci est juste un filet de sécurité
+        this.cleanable = CLEANER.register(this, new CleanupAction(handle));
     }
 
     /**
@@ -173,26 +202,15 @@ public class SecureMemory implements AutoCloseable {
      * Free the secure memory and zero all data.
      *
      * This method is idempotent - calling it multiple times is safe.
+     * After close(), the Cleaner will not run (it's automatically deregistered).
      */
     @Override
     public void close() {
         if (!closed && handle != null) {
-            SecureMemoryNative.INSTANCE.secure_memory_free(handle);
+            // Désenregistrer le cleaner (cleanup explicite)
+            cleanable.clean();
             handle = null;
             closed = true;
-        }
-    }
-
-    /**
-     * Ensure the memory is freed when garbage collected.
-     * Note: It's better to explicitly call close() or use try-with-resources.
-     */
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
         }
     }
 

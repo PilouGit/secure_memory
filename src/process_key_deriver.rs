@@ -121,12 +121,33 @@ impl ProcessKeyDeriver {
 }
 impl Drop for ProcessKeyDeriver {
     fn drop(&mut self) {
+        // ✅ SÉCURITÉ: Gestion gracieuse des erreurs dans Drop
+        // Drop ne doit JAMAIS paniquer (undefined behavior)
 
-        let ring = KeyRing::from_special_id(KeyRingIdentifier::Session, false).unwrap();
-
-        // Lookup an existing key
-        let _key = ring.search(&self.key).unwrap().invalidate();
-
-
+        match KeyRing::from_special_id(KeyRingIdentifier::Session, false) {
+            Ok(ring) => {
+                match ring.search(&self.key) {
+                    Ok(key) => {
+                        // Invalider la clé du keyring
+                        if let Err(e) = key.invalidate() {
+                            eprintln!("⚠️  WARNING: Failed to invalidate keyring key during cleanup: {:?}", e);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("⚠️  WARNING: Failed to find keyring key '{}' during cleanup: {:?}", self.key, e);
+                        // Clé peut avoir déjà été invalidée ou ne jamais avoir existé
+                        // Ce n'est pas fatal - continuons le cleanup
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("⚠️  WARNING: Failed to access session keyring during cleanup: {:?}", e);
+                eprintln!("   This may indicate:");
+                eprintln!("   - Keyring support not available in kernel");
+                eprintln!("   - Permission issues");
+                eprintln!("   - Session keyring already destroyed");
+                // Non-fatal - le processus peut se terminer normalement
+            }
+        }
     }
 }

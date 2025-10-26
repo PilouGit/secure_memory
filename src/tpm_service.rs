@@ -15,6 +15,28 @@ use crate::secure_error::SecurityError;
 use crate::process_key_deriver::ProcessKeyDeriver;
 
 /// TPM cryptographic operations wrapper
+///
+/// This structure provides a thread-safe interface to TPM 2.0 operations including:
+/// - Random number generation (hardware RNG)
+/// - RSA encryption/decryption with TPM-sealed keys
+/// - Key derivation bound to process identity
+///
+/// # Thread Safety
+///
+/// All TPM operations are protected by internal mutexes:
+/// - `context`: Mutex<Context> - Protects TPM context
+/// - `primary`: Mutex<Option<...>>` - Protects primary key
+/// - `rsa_key_handle`: Mutex<Option<...>>` - Protects RSA key handle
+///
+/// This ensures memory safety but **does NOT** improve performance in multi-threaded scenarios.
+/// The TPM hardware is fundamentally single-threaded, so concurrent calls will be serialized.
+///
+/// # Performance Note
+///
+/// For high-performance applications:
+/// - Minimize TPM calls by caching results
+/// - Prefer bulk operations over many small calls
+/// - Consider using the TPM only for key sealing, not frequent operations
 pub struct TpmCrypto {
     context: Mutex<Context>,
     tpm_process_auth: ProcessKeyDeriver,
@@ -99,7 +121,49 @@ fn get_tcti_from_env() -> TctiNameConf {
     }
 }
 
-/// get or create - retourne un guard pour accéder au TpmCrypto
+/// Get or create the TPM service singleton
+///
+/// # Thread Safety
+///
+/// This function is **thread-safe** and can be called concurrently from multiple threads.
+/// Access to the TPM service is protected by a `Mutex`, ensuring safe concurrent access.
+///
+/// However, note these important limitations:
+///
+/// ## Performance Considerations
+///
+/// - **The underlying TPM hardware is single-threaded**: Even though this Rust API is thread-safe
+///   via mutexes, the TPM chip itself can only process one command at a time.
+/// - **Contention under load**: Heavy concurrent usage from multiple threads will experience
+///   contention and serialization at the mutex level.
+/// - **Not suitable for high-throughput scenarios**: If your application requires high-throughput
+///   cryptographic operations, consider:
+///   1. Caching derived keys instead of deriving them repeatedly
+///   2. Using a pool of pre-generated keys
+///   3. Batching operations to minimize TPM calls
+///
+/// ## Example Usage
+///
+/// ```rust
+/// use secure_memory::tpm_service::get_service;
+///
+/// // Thread-safe: can be called from multiple threads
+/// let tpm = get_service();
+/// let mut random_data = [0u8; 32];
+/// tpm.random(&mut random_data).unwrap();
+/// ```
+///
+/// ## Recommendations
+///
+/// - ✅ **DO**: Use for key derivation, sealing, and occasional random number generation
+/// - ✅ **DO**: Cache results when possible to reduce TPM calls
+/// - ⚠️ **AVOID**: Calling from tight loops or high-frequency code paths
+/// - ⚠️ **AVOID**: Heavy concurrent usage from many threads (will serialize)
+///
+/// # Returns
+///
+/// A `TpmServiceGuard` that provides scoped access to the TPM service.
+/// The guard automatically releases the lock when dropped.
 pub fn get_service() -> TpmServiceGuard<'static> {
     // Enregistrer le cleanup à la fin du processus (une seule fois)
     ATEXIT_REGISTERED.call_once(|| {

@@ -27,6 +27,41 @@ fn round_to_page_size(size: usize) -> usize {
     (size + page_size - 1) / page_size * page_size
 }
 
+/// Options for creating SecureMemory
+#[derive(Clone, Debug)]
+pub struct SecureMemoryOptions {
+    /// Size of the memory buffer in bytes
+    pub size: usize,
+    /// If true, the memory can only be written once
+    pub write_once: bool,
+    /// If true, abort if mlock() fails (guarantees no swap to disk)
+    /// If false, only warn if mlock() fails
+    pub strict_mlock: bool,
+}
+
+impl SecureMemoryOptions {
+    /// Create default options with given size
+    pub fn new(size: usize) -> Self {
+        Self {
+            size,
+            write_once: false,
+            strict_mlock: false,
+        }
+    }
+
+    /// Set write-once mode
+    pub fn with_write_once(mut self, write_once: bool) -> Self {
+        self.write_once = write_once;
+        self
+    }
+
+    /// Set strict mlock mode
+    pub fn with_strict_mlock(mut self, strict_mlock: bool) -> Self {
+        self.strict_mlock = strict_mlock;
+        self
+    }
+}
+
 /// SecureMemory with buffer overflow protection using canaries and mmap-based memory protection
 pub struct SecureMemory {
     ptr: NonNull<u8>,
@@ -43,12 +78,12 @@ pub struct SecureMemory {
 
 impl SecureMemory {
 
-     /// Create a secure Memory with default settings (write_once = false)
+     /// Create a secure Memory with default settings (write_once = false, strict_mlock = false)
      pub fn new(size: usize) -> Option<Self> {
-        Self::new_with_options(size, false)
+        Self::create(SecureMemoryOptions::new(size))
      }
 
-     /// Create a secure Memory with options
+     /// Create a secure Memory with write-once option
      ///
      /// # Arguments
      /// * `size` - Size of the memory buffer in bytes
@@ -58,6 +93,30 @@ impl SecureMemory {
      /// * `Some(SecureMemory)` - Successfully allocated secure memory
      /// * `None` - Allocation failed (size = 0 or malloc failed)
      pub fn new_with_options(size: usize, write_once: bool) -> Option<Self> {
+        Self::create(SecureMemoryOptions::new(size).with_write_once(write_once))
+     }
+
+     /// Create a secure Memory with full options control
+     ///
+     /// # Arguments
+     /// * `options` - SecureMemoryOptions containing all configuration
+     ///
+     /// # Returns
+     /// * `Some(SecureMemory)` - Successfully allocated secure memory
+     /// * `None` - Allocation failed
+     ///
+     /// # Example
+     /// ```
+     /// use secure_memory::secure_memory::{SecureMemory, SecureMemoryOptions};
+     ///
+     /// let opts = SecureMemoryOptions::new(256)
+     ///     .with_write_once(true)
+     ///     .with_strict_mlock(true);
+     ///
+     /// let memory = SecureMemory::create(opts).expect("Failed to create");
+     /// ```
+     pub fn create(options: SecureMemoryOptions) -> Option<Self> {
+        let size = options.size;
         // Refuse zero-sized allocations
         if size == 0 {
             return None;
@@ -96,10 +155,22 @@ impl SecureMemory {
             // Cela empêche les secrets d'être écrits dans le fichier de swap
             let mlock_result = libc::mlock(ptr as *const libc::c_void, mapped_size);
             if mlock_result != 0 {
-                // mlock() a échoué - probablement pas de permissions (RLIMIT_MEMLOCK)
-                // On continue quand même mais on log un warning
-                eprintln!("⚠️  WARNING: mlock() failed - memory may be swapped to disk!");
-                eprintln!("   Consider running with CAP_IPC_LOCK or increasing RLIMIT_MEMLOCK");
+                if options.strict_mlock {
+                    // ✅ STRICT MODE: Échec de mlock() est fatal
+                    eprintln!("CRITICAL: mlock() failed in strict mode!");
+                    eprintln!("   Secure memory REQUIRES mlock() to prevent swap to disk.");
+                    eprintln!("   Solutions:");
+                    eprintln!("   1. Run with CAP_IPC_LOCK capability");
+                    eprintln!("   2. Increase RLIMIT_MEMLOCK (ulimit -l)");
+                    eprintln!("   3. Use non-strict mode (not recommended for production)");
+                    libc::munmap(ptr, mapped_size);
+                    return None;
+                } else {
+                    // ⚠️ NON-STRICT MODE: Warning seulement
+                    eprintln!("⚠️  WARNING: mlock() failed - memory may be swapped to disk!");
+                    eprintln!("   Consider running with CAP_IPC_LOCK or increasing RLIMIT_MEMLOCK");
+                    eprintln!("   Or use strict_mlock mode for production environments");
+                }
             }
 
             // 🔓 Temporairement autoriser l'écriture pour l'initialisation
@@ -121,7 +192,7 @@ impl SecureMemory {
             std::ptr::write(ptr as *mut u64, canary_start);
 
             // Écrire le flag write_once après le premier canary
-            std::ptr::write((ptr as *mut u8).add(CANARY_SIZE), if write_once { 1u8 } else { 0u8 });
+            std::ptr::write((ptr as *mut u8).add(CANARY_SIZE), if options.write_once { 1u8 } else { 0u8 });
 
             std::ptr::write((ptr as *mut u8).add(CANARY_SIZE + 1 + data_size) as *mut u64, canary_end);
 
@@ -142,7 +213,7 @@ impl SecureMemory {
                 ciphered_key,
                 canary_start,
                 canary_end,
-                write_once,
+                write_once: options.write_once,
                 has_been_written: false,
             })
         }
