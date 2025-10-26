@@ -14,15 +14,12 @@
 
 use std::{env, fs};
 use std::io::Read;
-use rand::rand_core::{OsError, OsRng};
+use rand::rand_core::OsRng;
 use rand::{rng,  Rng, TryRngCore};
 use sha2::{Sha256, Digest};
 use hkdf::Hkdf;
 use linux_keyutils::{KeyPermissionsBuilder, KeyRing, KeyRingIdentifier, Permission};
 use rand::distr::Alphanumeric;
-use tss_esapi::interface_types::algorithm::HashingAlgorithm;
-use tss_esapi::interface_types::resource_handles::Hierarchy;
-use tss_esapi::structures::{Data, HashScheme, PublicKeyRsa, RsaDecryptionScheme};
 use zeroize::{Zeroize, Zeroizing};
 use crate::secure_error::SecurityError;
 
@@ -128,7 +125,7 @@ impl Drop for ProcessKeyDeriver {
         let ring = KeyRing::from_special_id(KeyRingIdentifier::Session, false).unwrap();
 
         // Lookup an existing key
-        let key = ring.search(&self.key).unwrap().invalidate();
+        let _key = ring.search(&self.key).unwrap().invalidate();
 
 
     }

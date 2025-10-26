@@ -2,7 +2,7 @@
 
 A production-ready Rust library for **defense-grade secure memory management** with hardware-backed encryption, memory protection, and multi-layered security. Includes Java (JNA) bindings for seamless cross-language integration.
 
-[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 
 ## 🎯 Features
@@ -80,6 +80,70 @@ secure_memory = "0.1.0"
 ```
 
 The native library is **automatically embedded** in the JAR - no manual setup required!
+
+---
+
+## ⚙️ Configuration
+
+### TPM TCTI Selection
+
+By default, SecureMemory uses a **TPM simulator** (Mssim) for development and testing. You can configure which TPM interface to use via the `TPM_TCTI` environment variable:
+
+#### Supported Values:
+
+| Value | Description | Use Case |
+|-------|-------------|----------|
+| `mssim` or `simulator` | TPM Software Simulator | Development, testing, CI/CD (default) |
+| `device` | Hardware TPM (`/dev/tpm0` or `/dev/tpmrm0`) | Production on physical machines |
+| `tabrmd` | TPM Access Broker & Resource Manager | Enterprise deployments |
+
+#### Examples:
+
+```bash
+# Use TPM simulator (default - no TPM hardware required)
+export TPM_TCTI=mssim
+cargo run
+
+# Use hardware TPM on Linux (auto-detects /dev/tpm0 or /dev/tpmrm0)
+export TPM_TCTI=device
+cargo run
+
+# Use TPM Access Broker & Resource Manager
+export TPM_TCTI=tabrmd
+cargo run
+
+# Java applications
+export TPM_TCTI=device
+java -jar your-app.jar
+```
+
+#### Requirements by TCTI:
+
+**Simulator (`mssim`)**:
+- Install TPM simulator: `sudo apt-get install tpm2-tools`
+- Start simulator: `tpm_server &`
+- No hardware TPM needed
+
+**Device (`device`)**:
+- Physical TPM 2.0 chip required
+- Linux kernel with TPM support
+- Device file: `/dev/tpm0` or `/dev/tpmrm0`
+
+**Tabrmd**:
+- Install daemon: `sudo apt-get install tpm2-abrmd`
+- Start daemon: `sudo systemctl start tpm2-abrmd`
+
+> **Note**: If `TPM_TCTI` is not set, SecureMemory defaults to `mssim` (simulator mode) for maximum compatibility during development.
+
+#### Quick Test:
+
+Run the demo script to test all available TCTI configurations:
+
+```bash
+./examples/tpm-tcti-demo.sh
+```
+
+This script will automatically detect available TPM interfaces and demonstrate each one.
 
 ---
 

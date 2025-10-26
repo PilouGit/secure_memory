@@ -1,4 +1,4 @@
-use std::sync::{OnceLock, Mutex};
+use std::sync::Mutex;
 use rand::rand_core::OsRng;
 use rand::TryRngCore;
 use tss_esapi::handles::KeyHandle;
@@ -8,7 +8,7 @@ use tss_esapi::interface_types::algorithm::HashingAlgorithm;
 use tss_esapi::{Context, Error, Result};
 use tss_esapi::TctiNameConf;
 use tss_esapi::attributes::ObjectAttributesBuilder;
-use tss_esapi::constants::{ResponseCode, StartupType, Tss2ResponseCode, Tss2ResponseCodeKind};
+use tss_esapi::constants::{StartupType, Tss2ResponseCodeKind};
 use tss_esapi::structures::*;
 use tss_esapi::interface_types::algorithm::*;
 use crate::secure_error::SecurityError;
@@ -57,6 +57,48 @@ extern "C" fn cleanup_on_exit() {
     println!("✅ Cleanup terminé: Drop + NVChip nettoyé");
 }
 
+/// Parse la variable d'environnement TPM_TCTI pour déterminer le TCTI à utiliser
+///
+/// Valeurs supportées:
+/// - "mssim" ou "simulator" → Simulateur TPM (défaut)
+/// - "device" ou "device:/dev/tpm0" → TPM matériel
+/// - "tabrmd" → TPM Access Broker & Resource Manager
+///
+/// Exemples:
+/// ```bash
+/// export TPM_TCTI=device          # Utilise /dev/tpm0
+/// export TPM_TCTI=device:/dev/tpmrm0  # Utilise /dev/tpmrm0
+/// export TPM_TCTI=mssim           # Utilise le simulateur (défaut)
+/// export TPM_TCTI=tabrmd          # Utilise le resource manager
+/// ```
+fn get_tcti_from_env() -> TctiNameConf {
+    match std::env::var("TPM_TCTI") {
+        Ok(val) => {
+            let val_lower = val.to_lowercase();
+
+            if val_lower == "mssim" || val_lower == "simulator" {
+                println!("🔧 TPM_TCTI=mssim → Utilisation du simulateur TPM");
+                TctiNameConf::Mssim(Default::default())
+            } else if val_lower.starts_with("device") {
+                // Support "device" (utilise /dev/tpm0 ou /dev/tpmrm0 par défaut)
+                println!("🔧 TPM_TCTI=device → Utilisation du TPM matériel");
+                TctiNameConf::Device(Default::default())
+            } else if val_lower == "tabrmd" {
+                println!("🔧 TPM_TCTI=tabrmd → Utilisation du TPM Resource Manager");
+                TctiNameConf::Tabrmd(Default::default())
+            } else {
+                eprintln!("⚠️  TPM_TCTI='{}' non reconnu, utilisation du simulateur par défaut", val);
+                eprintln!("    Valeurs supportées: mssim, simulator, device, device:/dev/tpm0, tabrmd");
+                TctiNameConf::Mssim(Default::default())
+            }
+        },
+        Err(_) => {
+            println!("🔧 TPM_TCTI non défini → Utilisation du simulateur par défaut");
+            TctiNameConf::Mssim(Default::default())
+        }
+    }
+}
+
 /// get or create - retourne un guard pour accéder au TpmCrypto
 pub fn get_service() -> TpmServiceGuard<'static> {
     // Enregistrer le cleanup à la fin du processus (une seule fois)
@@ -70,7 +112,8 @@ pub fn get_service() -> TpmServiceGuard<'static> {
     // Initialiser si nécessaire
     let mut guard = TPM.lock().unwrap();
     if guard.is_none() {
-        let s = TpmCrypto::create(TctiNameConf::Mssim(Default::default())).unwrap();
+        let tcti = get_tcti_from_env();
+        let s = TpmCrypto::create(tcti).unwrap();
         s.init_key(); // ✅ Appel explicite après construction
         *guard = Some(s);
     }
@@ -112,7 +155,7 @@ fn ensure_tpm_started(context: &mut Context) -> Result<()> {
         Ok(_) => Ok(()), // déjà initialisé
         Err(Error::Tss2Error(e)) => {
             // TPM_RC_INITIALIZE
-            if (e.kind()== Some(Tss2ResponseCodeKind::Initialize))
+            if e.kind()== Some(Tss2ResponseCodeKind::Initialize)
             {
                 println!("TPM not started, sending Startup(Clear)... {:?} ", e.kind());
                 context.startup(StartupType::Clear)?;
@@ -128,7 +171,7 @@ impl TpmCrypto {
     /// Create a new TpmCrypto instance with TPM context
     pub fn create(tcti_name_conf: TctiNameConf)  -> std::result::Result<Self, SecurityError> {
         let mut context = Context::new(tcti_name_conf)?;
-        ensure_tpm_started(&mut context);
+        let _ = ensure_tpm_started(&mut context);
         let tpm_process_auth = ProcessKeyDeriver::create()?;
 
         Ok(TpmCrypto {
@@ -194,7 +237,7 @@ impl TpmCrypto {
                 SymmetricDefinitionObject::AES_128_CFB,
             ))
             .with_symmetric_cipher_unique_identifier(Digest::default())
-            .build()  .expect("Failed to build primary pub ");;
+            .build()  .expect("Failed to build primary pub ");
 
         // ✅ Créer Auth depuis le secret dérivé (extraire la valeur de Zeroizing)
         let auth = Auth::try_from(derived_secret.as_slice())?;
