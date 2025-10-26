@@ -33,7 +33,8 @@ libc="0.2.177"
 sha2 = "0.11.0-rc.2"
 hkdf = "0.13.0-rc.2"
 linux-keyutils = "0.2"
-
+ctor = "0.6.0"
+seccomp = { version = "0.1.2", optional = true }
 [dev-dependencies]
 criterion = "0.7.0"
 proptest = "1.0"

@@ -38,3 +38,19 @@ pub mod process_key_deriver;
 
 pub mod secure_error;
 
+ mod anti_debug;
+
+pub use anti_debug::harden_process;
+
+/// Active les protections anti-debug pour ce processus.
+/// À appeler explicitement par l’application avant toute opération sensible.
+///
+/// Exemple:
+/// ```
+/// secure_memory::init_secure_env().expect("anti-debug setup failed");
+/// ```
+#[cfg(all(not(test), not(debug_assertions)))]
+#[ctor::ctor]
+pub fn init_secure_env() -> Result<(), String> {
+    anti_debug::harden_process()
+}
