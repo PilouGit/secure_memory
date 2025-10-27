@@ -51,6 +51,8 @@ pub use anti_debug::harden_process;
 /// ```
 #[cfg(all(not(test), not(debug_assertions)))]
 #[ctor::ctor]
-pub fn init_secure_env() -> Result<(), String> {
-    anti_debug::harden_process()
+fn init_secure_env() {
+    if let Err(e) = anti_debug::harden_process() {
+        eprintln!("⚠️  WARNING: Failed to harden process: {}", e);
+    }
 }

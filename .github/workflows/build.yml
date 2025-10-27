@@ -53,7 +53,23 @@ jobs:
           pkg-config \
           libssl-dev \
           libtss2-dev \
-          tpm2-tools
+          tpm2-tools \
+          tpm2-abrmd
+
+    - name: Start TPM Simulator
+      run: |
+        # Install IBM TPM Simulator
+        wget https://downloads.sourceforge.net/project/ibmswtpm2/ibmtpm1682.tar.gz
+        mkdir ibmtpm
+        cd ibmtpm
+        tar -xvf ../ibmtpm1682.tar.gz
+        cd src
+        make
+        # Start simulator in background
+        ./tpm_server &
+        sleep 2
+        echo "TPM Simulator started on port 2321"
+      continue-on-error: false
 
     - name: Check Rust formatting
       run: cargo fmt --all -- --check
