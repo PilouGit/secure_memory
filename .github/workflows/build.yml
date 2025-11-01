@@ -148,7 +148,7 @@ jobs:
           libssl-dev \
           libtss2-dev \
           tpm2-tools \
-          tpm2-abrmd
+          tpm2-abrmd autoconf automake libtool pkg-config m4
 
     - name: Start TPM Simulator
       run: |
