@@ -54,18 +54,16 @@ jobs:
           libssl-dev \
           libtss2-dev \
           tpm2-tools \
-          tpm2-abrmd \
-          autoconf \
-          automake \
-          libtool 
+          tpm2-abrmd 
 
     - name: Start TPM Simulator
       run: |
         # Install Microsoft TPM Simulator
         git clone https://github.com/microsoft/ms-tpm-20-ref.git
         cd ms-tpm-20-ref/TPMCmd
-         ./configure
-        make install
+        ./bootstrap
+        ./configure
+        make
         # Start simulator in background
         ./tpm2-simulator &
         sleep 2
@@ -150,18 +148,16 @@ jobs:
           libssl-dev \
           libtss2-dev \
           tpm2-tools \
-          tpm2-abrmd \
-          autoconf \
-          automake \
-          libtool
+          tpm2-abrmd
 
     - name: Start TPM Simulator
       run: |
         # Install Microsoft TPM Simulator
-         git clone https://github.com/microsoft/ms-tpm-20-ref.git
+        git clone https://github.com/microsoft/ms-tpm-20-ref.git
         cd ms-tpm-20-ref/TPMCmd
-         ./configure
-        make install
+        ./bootstrap
+        ./configure
+        make
         # Start simulator in background
         ./tpm2-simulator &
         sleep 2
