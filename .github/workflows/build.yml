@@ -54,7 +54,7 @@ jobs:
           libssl-dev \
           libtss2-dev \
           tpm2-tools \
-          tpm2-abrmd
+          tpm2-abrmd 
 
     - name: Start TPM Simulator
       run: |
@@ -136,7 +136,9 @@ jobs:
 
     - name: Build Java bindings
       working-directory: java
-      run: mvn clean package -DskipTests
+      run: |
+        sudo apt install -y tpm2-tss-dev pkg-config
+        mvn clean package -DskipTests
 
     - name: Run Java tests
       working-directory: java
