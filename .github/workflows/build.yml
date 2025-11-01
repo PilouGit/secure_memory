@@ -54,21 +54,23 @@ jobs:
           libssl-dev \
           libtss2-dev \
           tpm2-tools \
-          tpm2-abrmd 
+          tpm2-abrmd \
+          autoconf \
+          automake \
+          libtool 
 
     - name: Start TPM Simulator
       run: |
-        # Install IBM TPM Simulator
-        wget https://downloads.sourceforge.net/project/ibmswtpm2/ibmtpm1682.tar.gz
-        mkdir ibmtpm
-        cd ibmtpm
-        tar -xvf ../ibmtpm1682.tar.gz
-        cd src
+        # Install Microsoft TPM Simulator
+        git clone https://github.com/microsoft/ms-tpm-20-ref.git
+        cd ms-tpm-20-ref/TPMCmd/Simulator/src
+        ./bootstrap
+        ./configure
         make
         # Start simulator in background
-        ./tpm_server &
+        ./tpm2-simulator &
         sleep 2
-        echo "TPM Simulator started on port 2321"
+        echo "Microsoft TPM Simulator started on port 2321"
       continue-on-error: false
 
     - name: Check Rust formatting
@@ -139,6 +141,34 @@ jobs:
       run: |
         sudo apt install -y libtss2-dev pkg-config
         mvn clean package -DskipTests
+
+    - name: Install TPM simulator dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          pkg-config \
+          libssl-dev \
+          libtss2-dev \
+          tpm2-tools \
+          tpm2-abrmd \
+          autoconf \
+          automake \
+          libtool
+
+    - name: Start TPM Simulator
+      run: |
+        # Install Microsoft TPM Simulator
+        git clone https://github.com/microsoft/ms-tpm-20-ref.git
+        cd ms-tpm-20-ref/TPMCmd/Simulator/src
+        ./bootstrap
+        ./configure
+        make
+        # Start simulator in background
+        ./tpm2-simulator &
+        sleep 2
+        echo "Microsoft TPM Simulator started on port 2321"
+      continue-on-error: false
 
     - name: Run Java tests
       working-directory: java
