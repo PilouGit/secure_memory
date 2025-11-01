@@ -63,10 +63,9 @@ jobs:
       run: |
         # Install Microsoft TPM Simulator
         git clone https://github.com/microsoft/ms-tpm-20-ref.git
-        cd ms-tpm-20-ref/TPMCmd/Simulator/src
-        ./bootstrap
-        ./configure
-        make
+        cd ms-tpm-20-ref/TPMCmd
+         ./configure
+        make install
         # Start simulator in background
         ./tpm2-simulator &
         sleep 2
@@ -159,11 +158,10 @@ jobs:
     - name: Start TPM Simulator
       run: |
         # Install Microsoft TPM Simulator
-        git clone https://github.com/microsoft/ms-tpm-20-ref.git
-        cd ms-tpm-20-ref/TPMCmd/Simulator/src
-        ./bootstrap
-        ./configure
-        make
+         git clone https://github.com/microsoft/ms-tpm-20-ref.git
+        cd ms-tpm-20-ref/TPMCmd
+         ./configure
+        make install
         # Start simulator in background
         ./tpm2-simulator &
         sleep 2
