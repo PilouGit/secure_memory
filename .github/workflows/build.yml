@@ -137,7 +137,7 @@ jobs:
     - name: Build Java bindings
       working-directory: java
       run: |
-        sudo apt install -y tpm2-tss-dev pkg-config
+        sudo apt install -y libtss2-dev pkg-config
         mvn clean package -DskipTests
 
     - name: Run Java tests
