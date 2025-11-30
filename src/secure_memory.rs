@@ -1,10 +1,12 @@
 use std::ptr::NonNull;
 
 use crate::secure_key::SecureKey;
+use crate::secure_error::SecurityError;
 use libc;
 
 use aes_gcm::{aead::{Aead, KeyInit, Payload}, Aes256Gcm, Error, Nonce};
 use zeroize::Zeroize;
+use subtle::ConstantTimeEq;
 use crate::tpm_service::get_service;
 
 // Constantes pour AES-GCM
@@ -247,14 +249,18 @@ impl SecureMemory {
                 eprintln!("⚠️ WARNING: mprotect(PROT_NONE) failed in check_canaries");
             }
 
-            // Vérifier que les canaries n'ont pas été modifiés
-            let canaries_ok = stored_canary_start == self.canary_start && stored_canary_end == self.canary_end;
+            // 🔒 SÉCURITÉ: Vérification constant-time pour éviter timing attacks
+            // Vérifier que les canaries n'ont pas été modifiés (constant-time)
+            let canary_start_ok = stored_canary_start.ct_eq(&self.canary_start);
+            let canary_end_ok = stored_canary_end.ct_eq(&self.canary_end);
 
-            // Vérifier que le flag write_once correspond
+            // Vérifier que le flag write_once correspond (constant-time)
             let expected_flag = if self.write_once { 1u8 } else { 0u8 };
-            let flag_ok = stored_write_once_flag == expected_flag;
+            let flag_ok = stored_write_once_flag.ct_eq(&expected_flag);
 
-            canaries_ok && flag_ok
+            // Combiner les résultats de manière constant-time
+            let all_ok = canary_start_ok & canary_end_ok & flag_ok;
+            bool::from(all_ok)
         }
      }
 
@@ -463,13 +469,13 @@ impl SecureMemory {
    /// Allow WriteAccess to the memory
    ///
    /// # Returns
-   /// Returns `Ok(())` on success, `Err(())` if write-once violation
-   pub fn write<F>(&mut self,  f: F) -> Result<(), ()>
+   /// Returns `Ok(())` on success, `Err(SecurityError::WriteOnceViolation)` if write-once violation
+   pub fn write<F>(&mut self,  f: F) -> Result<(), SecurityError>
         where F: FnMut(&mut [u8])
         {
             // Vérifier le flag write_once
             if self.write_once && self.has_been_written {
-                return Err(()); // Write-once violation
+                return Err(SecurityError::WriteOnceViolation);
             }
 
             self.access(f, true);
@@ -516,5 +522,27 @@ impl Drop for SecureMemory {
     }
 }
 
+// ✅ THREAD SAFETY: SecureMemory implements Send automatically
+// SecureMemory can be moved between threads safely because it owns all its data
 unsafe impl Send for SecureMemory {}
-unsafe impl Sync for SecureMemory {}
+
+// ❌ REMOVED: Sync implementation was unsafe without internal synchronization
+// SecureMemory does NOT implement Sync because it has no internal mutex
+// to protect concurrent access. Users must wrap in Arc<Mutex<SecureMemory>>
+// if they need to share across threads.
+//
+// Previous implementation:
+// unsafe impl Sync for SecureMemory {}
+//
+// This was incorrect because:
+// 1. No mutex protects mutable operations (read/write)
+// 2. Multiple threads could call mprotect() concurrently → race condition
+// 3. Could cause data races in plaintext buffers during callbacks
+//
+// Correct usage for multi-threading:
+//   let mem = Arc::new(Mutex::new(SecureMemory::new(256)?));
+//   let mem_clone = Arc::clone(&mem);
+//   thread::spawn(move || {
+//       let mut guard = mem_clone.lock().unwrap();
+//       guard.write(|buf| ...);
+//   });

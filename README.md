@@ -1,14 +1,19 @@
 # SecureMemory 🔒
 
-A production-ready Rust library for **defense-grade secure memory management** with hardware-backed encryption, memory protection, and multi-layered security. Includes Java (JNA) bindings for seamless cross-language integration.
+A Rust library for **multi-layered secure memory management** with hardware-backed encryption, memory protection, and anti-tampering features. Includes Java (JNA) bindings for cross-language integration.
+
+**⚠️ Status:** Alpha - Not yet production-ready. See [limitations](#-what-securememory-does-not-protect-against) before use.
 
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![Security Rating](https://img.shields.io/badge/security-9.85%2F10-brightgreen.svg)](SECURITY_ANALYSIS.md)
+[![Status](https://img.shields.io/badge/status-alpha-yellow.svg)](SECURITY_ANALYSIS.md)
+[![Security](https://img.shields.io/badge/security-audited-blue.svg)](SECURITY_ANALYSIS.md)
 
 ---
 
-> **📋 [Complete Security Analysis](SECURITY_ANALYSIS.md)** - Professional security audit report with OWASP Top 10, CWE Top 25, and NIST FIPS 140-2/3 compliance verification. Security rating: **9.85/10** (Production-ready).
+> **⚠️ ALPHA STATUS:** This library is in active development and has not undergone independent security audits. While it implements multiple security layers, it is **not yet recommended for production use** in critical systems. See [Security Analysis](SECURITY_ANALYSIS.md) for detailed threat model and limitations.
+
+> **📋 [Complete Security Analysis](SECURITY_ANALYSIS.md)** - Comprehensive security analysis covering OWASP Top 10, CWE Top 25, and detailed threat modeling. Includes honest assessment of protections and limitations.
 
 ---
 
