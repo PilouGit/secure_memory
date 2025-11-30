@@ -1,5 +1,11 @@
 name: Build SecureMemory
 
+# TPM Simulator Notes:
+# - IBM TPM Simulator is used (more reliable compilation than Microsoft's)
+# - Microsoft TPM requires autoconf/automake/libtool which can fail on some systems
+# - IBM TPM compiles with just gcc/make, fewer dependencies
+# - Both simulators listen on port 2321 and are compatible with tss-esapi
+
 on:
   push:
     branches: [ main, develop ]
@@ -10,6 +16,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  TPM_TCTI: mssim  # Use TPM simulator (default)
 
 jobs:
   build-rust:
@@ -58,16 +65,17 @@ jobs:
 
     - name: Start TPM Simulator
       run: |
-        # Install Microsoft TPM Simulator
-        git clone https://github.com/microsoft/ms-tpm-20-ref.git
-        cd ms-tpm-20-ref/TPMCmd
-        ./bootstrap
-        ./configure
+        # Install IBM TPM Simulator (more reliable than Microsoft)
+        wget https://downloads.sourceforge.net/project/ibmswtpm2/ibmtpm1682.tar.gz
+        mkdir ibmtpm
+        cd ibmtpm
+        tar -xvf ../ibmtpm1682.tar.gz
+        cd src
         make
         # Start simulator in background
-        ./tpm2-simulator &
+        ./tpm_server &
         sleep 2
-        echo "Microsoft TPM Simulator started on port 2321"
+        echo "IBM TPM Simulator started on port 2321"
       continue-on-error: false
 
     - name: Check Rust formatting
@@ -148,20 +156,21 @@ jobs:
           libssl-dev \
           libtss2-dev \
           tpm2-tools \
-          tpm2-abrmd autoconf automake libtool pkg-config m4
+          tpm2-abrmd
 
     - name: Start TPM Simulator
       run: |
-        # Install Microsoft TPM Simulator
-        git clone https://github.com/microsoft/ms-tpm-20-ref.git
-        cd ms-tpm-20-ref/TPMCmd
-        ./bootstrap
-        ./configure
+        # Install IBM TPM Simulator (more reliable than Microsoft)
+        wget https://downloads.sourceforge.net/project/ibmswtpm2/ibmtpm1682.tar.gz
+        mkdir ibmtpm
+        cd ibmtpm
+        tar -xvf ../ibmtpm1682.tar.gz
+        cd src
         make
         # Start simulator in background
-        ./tpm2-simulator &
+        ./tpm_server &
         sleep 2
-        echo "Microsoft TPM Simulator started on port 2321"
+        echo "IBM TPM Simulator started on port 2321"
       continue-on-error: false
 
     - name: Run Java tests
