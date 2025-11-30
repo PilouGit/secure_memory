@@ -32,6 +32,17 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Install TPM and build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          pkg-config \
+          libssl-dev \
+          libtss2-dev \
+          tpm2-tools \
+          tpm2-abrmd
+
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@master
       with:
@@ -47,21 +58,15 @@ jobs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           target/
-        key: ${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}-tss2
         restore-keys: |
           ${{ runner.os }}-cargo-${{ matrix.rust }}-
           ${{ runner.os }}-cargo-
 
-    - name: Install TPM simulator dependencies
+    - name: Verify TPM dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          build-essential \
-          pkg-config \
-          libssl-dev \
-          libtss2-dev \
-          tpm2-tools \
-          tpm2-abrmd 
+        pkg-config --modversion tss2-sys || echo "tss2-sys not found"
+        pkg-config --cflags tss2-sys || echo "tss2-sys headers not found"
 
     - name: Start TPM Simulator
       run: |
@@ -126,6 +131,17 @@ jobs:
         distribution: 'temurin'
         cache: 'maven'
 
+    - name: Install TPM and build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          pkg-config \
+          libssl-dev \
+          libtss2-dev \
+          tpm2-tools \
+          tpm2-abrmd
+
     - name: Download Rust artifacts
       id: download-artifact
       uses: actions/download-artifact@v4
@@ -143,20 +159,7 @@ jobs:
 
     - name: Build Java bindings
       working-directory: java
-      run: |
-        sudo apt install -y libtss2-dev pkg-config
-        mvn clean package -DskipTests
-
-    - name: Install TPM simulator dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          build-essential \
-          pkg-config \
-          libssl-dev \
-          libtss2-dev \
-          tpm2-tools \
-          tpm2-abrmd
+      run: mvn clean package -DskipTests
 
     - name: Start TPM Simulator
       run: |
@@ -207,6 +210,17 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
         cache: 'maven'
+
+    - name: Install TPM and build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          pkg-config \
+          libssl-dev \
+          libtss2-dev \
+          tpm2-tools \
+          tpm2-abrmd
 
     - name: Build Rust library
       run: |
