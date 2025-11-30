@@ -33,7 +33,7 @@ public class SecureMemoryApplication {
         // ✅ IMPORTANT: Register shutdown hook to cleanup TPM resources
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("🧹 Cleaning up TPM resources...");
-            com.securememory.SecureMemory.cleanupTpm();
+            io.github.pilougit.security.SecureMemory.cleanupTpm();
             log.info("✅ TPM cleanup completed");
         }));
 
