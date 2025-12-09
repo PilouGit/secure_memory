@@ -36,6 +36,8 @@ linux-keyutils = "0.2"
 ctor = "0.6.0"
 seccomp = { version = "0.1.2", optional = true }
 subtle = "2.6"
+rsa = { version = "0.9", features = ["sha2"] }
+hex = "0.4"
 
 [dev-dependencies]
 criterion = "0.5.1"

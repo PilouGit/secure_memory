@@ -83,9 +83,11 @@ secure_memory = "0.1.0"
 
 ### Java (Maven)
 
+**Requirements:** Java 17+ (LTS recommended)
+
 ```xml
 <dependency>
-    <groupId>com.securememory</groupId>
+    <groupId>io.github.pilougit.security</groupId>
     <artifactId>secure-memory-java</artifactId>
     <version>1.0.0</version>
 </dependency>

@@ -28,6 +28,10 @@
 pub mod utils;
 /// TPM service for cryptographic operations
 pub mod tpm_service;
+/// Software-only crypto service (no TPM required)
+pub mod tpm_service_software;
+/// Automatic crypto service (TPM or Software based on environment)
+pub mod crypto_service;
 /// Secure key operation
 pub mod secure_key;
 /// Secure Memory buffer
